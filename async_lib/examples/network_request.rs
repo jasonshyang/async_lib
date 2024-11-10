@@ -42,10 +42,6 @@ impl SimpleFuture for NetworkRequest {
         match self.receiver.poll(ctx) {
             State::Ready(_) => {
                 println!("NetworkRequest {}][poll] Request to {} completed", self.id, self.url);
-                if let Some(waker) = ctx.waker() {
-                    println!("[NetworkRequest {}][poll] Waking up the Executor task ...", self.id);
-                    waker.wake();
-                }
                 State::Ready(())
             }
             State::Pending => {

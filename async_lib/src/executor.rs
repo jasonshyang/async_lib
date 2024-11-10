@@ -4,7 +4,6 @@ use crate::channel::Channel;
 use std::sync::Arc;
 use std::collections::VecDeque;
 use std::thread;
-use std::time::Duration;
 
 pub struct Executor {
     tasks: VecDeque<Box<dyn SimpleFuture<Output = ()>>>, // Tasks queue
@@ -32,7 +31,7 @@ impl Executor {
     pub fn run(&mut self) {
         let mut receiver = self.channel.receiver();
         // Main loop to run the executor, runs until all tasks are completed
-        while !self.tasks.is_empty() {
+        'main: while !self.tasks.is_empty() {
             println!("[Async_lib][Executor][run] Running executor ...");
             let mut pending_tasks = VecDeque::new();
             let mut all_tasks_pending = true;
@@ -40,10 +39,10 @@ impl Executor {
             while let Some(mut task) = self.tasks.pop_front() {
                 println!("[Async_lib][Executor][run] Polling task ...");
                 let waker = Waker::new(Arc::new({
-                    let sender = self.channel.sender();
+                    let thread = thread::current();
                     move || {
-                        sender.send(());
-                        println!("*** Waker triggered ***");
+                        println!("!!! Executor Waking up !!!");
+                        thread.unpark();
                     }
                 }));
                 // Poll the task and check the state, context is passed to the task with the waker
@@ -60,24 +59,20 @@ impl Executor {
                 }
             }
 
-            if !pending_tasks.is_empty() && all_tasks_pending {
+            self.tasks = pending_tasks;
+
+            if !self.tasks.is_empty() && all_tasks_pending {
                 println!("[Async_lib][Executor][run] All tasks are pending, waiting for wake up signal ...");
-                let waker = Waker::new(Arc::new(move || {
-                    println!("[Executor] Executor receiver waker triggered");
-                }));
+                println!("ZZZzzz... Executor Sleeping ZZZzzz...");
+                let waker = Waker::noop();
                 let mut ctx = Context::new(waker);
                 
                 match receiver.poll(&mut ctx) {
-                    State::Ready(_) => {
-                        println!("[Async_lib][Executor][run] Received wake-up signal");
-                    }
-                    State::Pending => {
-                        println!("[Async_lib][Executor][run] Receiver still pending ... Sleeping for 100ms");
-                        thread::sleep(Duration::from_millis(100));
-                    }
+                    State::Ready(_) => continue 'main,  // Resume polling tasks with the main loop
+                    State::Pending => thread::park(),
                 }
             }
-            self.tasks = pending_tasks;
+
             println!("[Async_lib][Executor][run] Tasks left: {}", self.tasks.len());
         }
     }

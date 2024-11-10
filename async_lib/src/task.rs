@@ -22,6 +22,12 @@ impl Waker {
         println!("[Async_lib][Waker][wake] Waking up task ...");
         (self.wake_fn)();
     }
+
+    pub fn noop() -> Self {
+        Waker {
+            wake_fn: Arc::new(|| {}),
+        }
+    }
 }
 
 // The Context struct is used to store the waker for the task, it is used by the task to get the waker
