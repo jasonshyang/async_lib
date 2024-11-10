@@ -24,10 +24,10 @@ impl NetworkRequest {
 
     fn make_api_call(url: String, sender: Sender<String>) {
         thread::spawn(move || {
-            println!("[NetworkRequest][API Call] Making request to {}", url);
+            println!("[API Call] Making request to {}", url);
             thread::sleep(Duration::from_millis(100));
             let response = format!("status: success, url: {}, data: ok", url);
-            println!("[NetworkRequest][API Call] Got response from {}", url);
+            println!("[API Call] Got response from {}", url);
             sender.send(response);
         });
     }
@@ -42,6 +42,10 @@ impl SimpleFuture for NetworkRequest {
         match self.receiver.poll(ctx) {
             State::Ready(_) => {
                 println!("NetworkRequest {}][poll] Request to {} completed", self.id, self.url);
+                if let Some(waker) = ctx.waker() {
+                    println!("[NetworkRequest {}][poll] Waking up the Executor task ...", self.id);
+                    waker.wake();
+                }
                 State::Ready(())
             }
             State::Pending => {
@@ -67,15 +71,18 @@ fn main() {
     executor.spawn(Box::new(request2));
     executor.spawn(Box::new(request3));
 
-    thread::spawn(move || {
+    let executor_handle = thread::spawn(move || {
+        println!("[Main] Running executor ...");
         executor.run();
+        println!("[Main] Executor completed");
     });
+
+    thread::sleep(Duration::from_millis(100));
 
     // Simulate API calls
     NetworkRequest::make_api_call("http://api1.example.com".to_string(), channel1.sender());
     NetworkRequest::make_api_call("http://api2.example.com".to_string(), channel2.sender());
     NetworkRequest::make_api_call("http://api3.example.com".to_string(), channel3.sender());
 
-    // Wait for all requests to complete
-    thread::sleep(Duration::from_secs(2));
+    executor_handle.join().unwrap();
 }

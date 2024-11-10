@@ -33,6 +33,7 @@ impl Executor {
         let mut receiver = self.channel.receiver();
         // Main loop to run the executor, runs until all tasks are completed
         while !self.tasks.is_empty() {
+            println!("[Async_lib][Executor][run] Running executor ...");
             let mut pending_tasks = VecDeque::new();
             let mut all_tasks_pending = true;
             // Poll all the tasks in the list
@@ -42,7 +43,7 @@ impl Executor {
                     let sender = self.channel.sender();
                     move || {
                         sender.send(());
-                        println!("[Async_lib][Executor][run] Woken up by receiver - 1");
+                        println!("*** Waker triggered ***");
                     }
                 }));
                 // Poll the task and check the state, context is passed to the task with the waker
@@ -59,35 +60,25 @@ impl Executor {
                 }
             }
 
-            if pending_tasks.is_empty() {
-                println!("[Async_lib][Executor][run] All tasks are completed");
-                break;
-            }
-
-            if all_tasks_pending {
+            if !pending_tasks.is_empty() && all_tasks_pending {
                 println!("[Async_lib][Executor][run] All tasks are pending, waiting for wake up signal ...");
-                let waker = Waker::new(Arc::new({
-                    let sender = self.channel.sender();
-                    move || {
-                        sender.send(());
-                        println!("[Executor][run] Woken up by receiver - 2");
-                    }
+                let waker = Waker::new(Arc::new(move || {
+                    println!("[Executor] Executor receiver waker triggered");
                 }));
                 let mut ctx = Context::new(waker);
-                loop {
-                    match receiver.poll(&mut ctx) {
-                        State::Ready(_) => {
-                            println!("[Async_lib][Executor][run] Wake up signal received, continuing ...");
-                            break;
-                        }
-                        State::Pending => {
-                            println!("[Async_lib][Executor][run] Sleeping ... Checking every 100ms");
-                            thread::sleep(Duration::from_millis(100)); // TODO: Not ideal way to wait, should have better way to schedule the tasks
-                        }
+                
+                match receiver.poll(&mut ctx) {
+                    State::Ready(_) => {
+                        println!("[Async_lib][Executor][run] Received wake-up signal");
+                    }
+                    State::Pending => {
+                        println!("[Async_lib][Executor][run] Receiver still pending ... Sleeping for 100ms");
+                        thread::sleep(Duration::from_millis(100));
                     }
                 }
             }
             self.tasks = pending_tasks;
+            println!("[Async_lib][Executor][run] Tasks left: {}", self.tasks.len());
         }
     }
 }
