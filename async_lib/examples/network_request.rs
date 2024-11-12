@@ -22,10 +22,10 @@ impl NetworkRequest {
         NetworkRequest { id, receiver, url }
     }
 
-    fn make_api_call(url: String, sender: Sender<String>) {
+    fn make_api_call(url: String, sender: Sender<String>, process_time: u64) {
         thread::spawn(move || {
-            println!("[API Call] Making request to {}", url);
-            thread::sleep(Duration::from_millis(100));
+            println!("[API Call] Making request to {}, process time: {}", url, process_time);
+            thread::sleep(Duration::from_millis(process_time));
             let response = format!("status: success, url: {}, data: ok", url);
             println!("[API Call] Got response from {}", url);
             sender.send(response);
@@ -76,9 +76,9 @@ fn main() {
     thread::sleep(Duration::from_millis(100));
 
     // Simulate API calls
-    NetworkRequest::make_api_call("http://api1.example.com".to_string(), channel1.sender());
-    NetworkRequest::make_api_call("http://api2.example.com".to_string(), channel2.sender());
-    NetworkRequest::make_api_call("http://api3.example.com".to_string(), channel3.sender());
+    NetworkRequest::make_api_call("http://api1.example.com".to_string(), channel1.sender(), 1000);
+    NetworkRequest::make_api_call("http://api2.example.com".to_string(), channel2.sender(), 2000);
+    NetworkRequest::make_api_call("http://api3.example.com".to_string(), channel3.sender(), 3000);
 
     executor_handle.join().unwrap();
 }

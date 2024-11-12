@@ -1,55 +1,72 @@
 use crate::task::{State, Context, Waker};
 use crate::future::SimpleFuture;
-use crate::channel::Channel;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Condvar};
 use std::collections::VecDeque;
-use std::thread;
 
+// TODO: Implement thread pool to distribute the tasks to multiple threads
 pub struct Executor {
-    tasks: VecDeque<Box<dyn SimpleFuture<Output = ()>>>, // Tasks queue
-    channel: Channel<()>, // Channel to wake up the tasks
+    tasks: Arc<Mutex<VecDeque<Box<dyn SimpleFuture<Output = ()>>>>>, // List of tasks to run
+    notifier: Arc<(Mutex<bool>, Condvar)>, // Notifier to wake up the executor
 }
 
 impl Executor {
     // Create a new instance of the executor, containing empty list of tasks and a channel
     pub fn new() -> Self {
         Executor {
-            tasks: VecDeque::new(),
-            channel: Channel::new(),
+            tasks: Arc::new(Mutex::new(VecDeque::new())),
+            notifier: Arc::new((Mutex::new(false), Condvar::new())),
         }
     }
 
     // Spawn a new task to the executor
+    // Push the task to the list and notify the executor to wake up via the notifier
     pub fn spawn(&mut self, task: Box<dyn SimpleFuture<Output = ()>>) {
-        self.tasks.push_back(task);
+        let mut tasks = self.tasks.lock().unwrap();
+        tasks.push_back(task);
+        let (lock, cvar) = &*self.notifier;
+        let mut notified = lock.lock().unwrap();
+        *notified = true;
+        cvar.notify_one();
     }
 
-    // Run the executor
-    // Initial polling: poll all the tasks in the list, if pending, stores the waker in the context
-    // If all tasks are pending, wait for the wake up signal from the receiver
-    // If a wake up signal is received, continue polling the tasks
     pub fn run(&mut self) {
-        let mut receiver = self.channel.receiver();
+        let (lock, cvar) = &*self.notifier;
         // Main loop to run the executor, runs until all tasks are completed
-        'main: while !self.tasks.is_empty() {
-            println!("[Async_lib][Executor][run] Running executor ...");
+        'main: loop {
+            println!("[Async_lib][Executor][run] Running executor main loop ...");
+            let mut tasks = self.tasks.lock().unwrap();
+
+            if tasks.is_empty() {
+                let mut notified = lock.lock().unwrap();
+                while !*notified {
+                    println!("[Async_lib][Executor][run] No tasks to run, sleeping ...");
+                    notified = cvar.wait(notified).unwrap();
+                }
+                *notified = false;
+
+                continue 'main;
+            }
+
             let mut pending_tasks = VecDeque::new();
             let mut all_tasks_pending = true;
             // Poll all the tasks in the list
-            while let Some(mut task) = self.tasks.pop_front() {
-                println!("[Async_lib][Executor][run] Polling task ...");
+            while let Some(mut task) = tasks.pop_front() {
+                println!("[Async_lib][Executor][run] Polling task from the list ...");
                 let waker = Waker::new(Arc::new({
-                    let thread = thread::current();
+                    let notifier = self.notifier.clone();
                     move || {
+                        let (lock, cvar) = &*notifier;
+                        let mut notified = lock.lock().unwrap();
+                        *notified = true;
+                        cvar.notify_one();
                         println!("!!! Executor Waking up !!!");
-                        thread.unpark();
                     }
                 }));
                 // Poll the task and check the state, context is passed to the task with the waker
                 let mut ctx = Context::new(waker);
                 match task.poll(&mut ctx) {
                     State::Ready(_) => {
-                        println!("[Async_lib][Executor][run] Task completed");
+                        println!("[Async_lib][Executor][run] Task completed, Tasks left: {}", tasks.len());
                         all_tasks_pending = false;
                     }
                     State::Pending => {
@@ -59,21 +76,20 @@ impl Executor {
                 }
             }
 
-            self.tasks = pending_tasks;
+            *tasks = pending_tasks; // Update the list with the pending tasks
 
-            if !self.tasks.is_empty() && all_tasks_pending {
+            if !tasks.is_empty() && all_tasks_pending {
                 println!("[Async_lib][Executor][run] All tasks are pending, waiting for wake up signal ...");
                 println!("ZZZzzz... Executor Sleeping ZZZzzz...");
-                let waker = Waker::noop();
-                let mut ctx = Context::new(waker);
-                
-                match receiver.poll(&mut ctx) {
-                    State::Ready(_) => continue 'main,  // Resume polling tasks with the main loop
-                    State::Pending => thread::park(),
-                }
-            }
+                drop(tasks);
 
-            println!("[Async_lib][Executor][run] Tasks left: {}", self.tasks.len());
+                let mut notified = lock.lock().unwrap();
+                while !*notified {
+                    notified = cvar.wait(notified).unwrap();
+                }
+                *notified = false;
+            }
+            println!("[Async_lib][Executor][run] Executor main loop completed");
         }
     }
 }
