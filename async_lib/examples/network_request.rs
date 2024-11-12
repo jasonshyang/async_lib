@@ -6,6 +6,7 @@ use async_lib::{
 };
 use std::thread;
 use std::time::Duration;
+use colored::*;
 
 // This example demonstrates how the lib can handle multiple network requests asynchronously
 // Channel is used to wake up the tasks when the API calls are completed
@@ -24,10 +25,9 @@ impl NetworkRequest {
 
     fn make_api_call(url: String, sender: Sender<String>, process_time: u64) {
         thread::spawn(move || {
-            println!("[API Call] Making request to {}, process time: {}", url, process_time);
+            println!("{}", format!("[API Call] Making request to {} ...", url).yellow());
             thread::sleep(Duration::from_millis(process_time));
             let response = format!("status: success, url: {}, data: ok", url);
-            println!("[API Call] Got response from {}", url);
             sender.send(response);
         });
     }
@@ -40,8 +40,8 @@ impl SimpleFuture for NetworkRequest {
         println!("[NetworkRequest {}][poll] Polling request to {} ...", self.id, self.url);
 
         match self.receiver.poll(ctx) {
-            State::Ready(_) => {
-                println!("NetworkRequest {}][poll] Request to {} completed", self.id, self.url);
+            State::Ready(message) => {
+                println!("[NetworkRequest {}][poll] Got response: {}", self.id, message.green());
                 State::Ready(())
             }
             State::Pending => {
@@ -64,8 +64,11 @@ fn main() {
     let request3 = NetworkRequest::new(3, channel3.receiver(), "http://api3.example.com".to_string());
 
     executor.spawn(Box::new(request1));
+    NetworkRequest::make_api_call("http://api1.example.com".to_string(), channel1.sender(), 1000);
     executor.spawn(Box::new(request2));
+    NetworkRequest::make_api_call("http://api2.example.com".to_string(), channel2.sender(), 2000);
     executor.spawn(Box::new(request3));
+    NetworkRequest::make_api_call("http://api3.example.com".to_string(), channel3.sender(), 3000);
 
     let executor_handle = thread::spawn(move || {
         println!("[Main] Running executor ...");
@@ -74,11 +77,6 @@ fn main() {
     });
 
     thread::sleep(Duration::from_millis(100));
-
-    // Simulate API calls
-    NetworkRequest::make_api_call("http://api1.example.com".to_string(), channel1.sender(), 1000);
-    NetworkRequest::make_api_call("http://api2.example.com".to_string(), channel2.sender(), 2000);
-    NetworkRequest::make_api_call("http://api3.example.com".to_string(), channel3.sender(), 3000);
 
     executor_handle.join().unwrap();
 }

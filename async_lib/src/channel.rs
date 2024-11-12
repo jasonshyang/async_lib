@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::future::SimpleFuture;
 use crate::task::{State, Context, Waker};
 
-pub struct Channel<T: Send> { // TODO: to be improved with more features, how to handle multiple receivers, etc.
+pub struct Channel<T: Send> {
     buffer: Arc<Mutex<VecDeque<T>>>,
     waker: Arc<Mutex<Option<Waker>>>,
 }
