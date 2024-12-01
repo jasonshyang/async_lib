@@ -110,3 +110,15 @@ To try out an example demonstrating basic async behavior:
 # Run the example
 cargo run --example io
 ```
+
+Expected output:
+```bash
+Starting I/O task ... 1
+Starting I/O task ... 2
+Starting I/O task ... 3
+Starting I/O task ... 4
+Received data: Task id: 1 completed, process time: 1 seconds
+Received data: Task id: 3 completed, process time: 2 seconds
+Received data: Task id: 2 completed, process time: 3 seconds
+Received data: Task id: 4 completed, process time: 3 seconds
+```
