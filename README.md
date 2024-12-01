@@ -1,45 +1,112 @@
 # async_lib
-A simple async runtime implementation in Rust for learning purposes.
+An over-simplified async runtime implementation in Rust for learning purpose.
 
-## What it does
-This library implements basic async programming concepts:
-- Future polling mechanism
-- Task executor
-- Async channels
-- Task wake-up system
+This crate is a manual exploration of asynchronous programming concepts in Rust. It avoids using standard features like the 'Future' trait and 'mpsc' channels to provide a deeper understanding of how async runtimes function under the hood. 
 
-## Code Structure
-- `src/future.rs` - Future trait definition
-- `src/executor.rs` - Task execution logic  
-- `src/channel.rs` - Async communication
-- `src/task.rs` - Task state and waking
+This is purely for my own educational and experimental purposes.
 
-## Example
-This example simulate making multiple network requests concurrently. The executor schedules three network requests, each represented by a NetworkRequest task. The tasks will poll for data from a channel, and when the data (simulating an API response) is ready, the task is woken up.
+## What It Does
+'async_lib' provides a minimal implementation of core async programming concepts, including:
 
-```bash
-# Run the example
-cargo run --example network_request
-```
+- **SimpleFuture trait**: a simplified version of the 'Rust' future trait.
+- **Executor**: a basic task scheduler for executing asynchronous tasks.
+- **Channels**: a custom implementation for task communication.
+- **Waker**: manages notifications for when tasks are ready to progress.
 
 ## Limitations
-- Cannot add tasks to the executor during runtime, so this does not really provide a runtime env for a typical server use case.
-- Might be able to improve this if the executor can use the channel to spawn new tasks, and enhance the channel to be able to handle cross thread task communication.
-- Also the executor doesn't support multithreaded execution, all the tasks are put in one queue which is not efficient, a thread pool can potentially improve this.
+Even for a simple manual async implementation, this crate is still lacking many basic features, and can only perform the very basic async tasks.
 
-## Next Iteration
-Improve the lib so it can actually handle multithread, and use for a simple echo server/client example where server can spawn multiple connections with multiple clients and use the lib to process client requests.
+Below is a list of thoughts afterward:
 
-The basic idea for next iteraction design:
-- The executor provides the runtime env, where it will first poll all tasks registered in queue
-- When a task is polled, it checks if the condition is ready, if yes completes the task and pass back data and the Ready state, if no pass back the Pending state. The task should also register the Waker with the Executor so it can wake up the Executor when receiving a signal
-- If all the tasks are pending, the Executor goes to sleep to avoid busy polling
-- Meanwhile new tasks can continue to be spawned, which adds to the Executor's queue
-- In multithread scenario, need to use a Channel to pass the tasks across to the Executor running on the Executor thread
-- When new task is added, Executor main loop wakes up again and go through the task queue, and go back to sleep
-- When there is signal for the task to be ready (e.g. network msg received), the signal is communicated via the Sender where it invokes the Waker, again need to consider multithread scenario where a Channel is required to pass the signal back to wake up the Executor
-- Now the Executor is waken up, it goes through the queue and poll them
+* 'Waker' should be invoked by event-driven listeners responding to I/O events, here wakers are manually triggered by the sender, which 
+   restricts functionality.. (this contributes to many of the below limitations)
+*  Using 'Condvar' as a way to wake up executor isnt ideal as it blocks the thread when the Executor awaits.
+*  Due to using 'Condvar', 'Executor' currently doesnt provide a true runtime environment, tasks are spawned first and then call run().
+   If Executor is ran on a separate thread, this might be overcame but still very very far from ideal
+*  Cannot use 'Rust' 'async/await' syntax sugar as this crate uses its own 'SimpleFuture'
 
-Futher improvement:
-- Provide a way to terminate the runtime
-- Thread Pool so the Executor can handle things more efficiently 
+## Code Structure
+
+- 'src/future.rs': Defines the Future trait and related types.
+- 'src/executor.rs': Contains the task execution logic and the executor implementation.
+- 'src/channel.rs': Implements asynchronous communication channels.
+- 'src/task.rs': Manages task states and the wake-up mechanism.
+- 'examples/': Provides example implementation demonstrating the library's capabilities.
+
+## Usage
+### Example
+This example demonstrates how non-blocking I/O can be executed asynchronously using this crate.
+```rust,no_run
+    use std::thread;
+    use std::time::Duration;
+
+    use async_lib::{
+        executor::Executor, 
+        task::{Context, SimpleFuture, State},
+        channel::*,
+    };
+    fn main() {
+        let mut executor = Executor::new();
+        executor.spawn( start_task(1, 1) );
+        executor.spawn( start_task(2, 3) );
+        executor.spawn( start_task(3, 2) );
+        executor.spawn( start_task(4, 3) );
+        executor.run();
+    }
+
+    fn start_task(id: usize, duration: u64) -> BoxedSimpleFuture {
+        println!("Starting I/O task ... {}", id);
+        let (sender, receiver) = channel::<String>();
+        let task = IoTask { receiver };
+
+        thread::spawn(move || {
+            process_task(id, Duration::from_secs(duration), sender);
+        });
+
+        BoxedSimpleFuture(Box::new(task))
+    }
+
+    fn process_task(id: usize, duration: Duration, sender: Sender<String>) {
+        thread::sleep(duration);
+        let data = "Task id: ".to_string() + &id.to_string() + " completed, process time: " + &duration.as_secs().to_string() + " seconds";
+        sender.send(data);
+    }
+
+    struct IoTask {
+        receiver: Receiver<String>,
+    }
+
+    impl SimpleFuture for IoTask {
+        type Output = ();
+
+        fn poll(&mut self, ctx: &mut Context) -> State<Self::Output> {
+            match self.receiver.try_recv() {
+                Some(data) => {
+                    println!("Received data: {}", data);
+                    State::Ready(())
+                }
+                None => {
+                    self.receiver.register_waker(ctx.waker().clone());
+                    State::Pending
+                }
+            }
+        }
+    }
+
+    struct BoxedSimpleFuture(Box<dyn SimpleFuture<Output = ()>>);
+
+    impl SimpleFuture for BoxedSimpleFuture {
+        type Output = ();
+
+        fn poll(&mut self, ctx: &mut Context) -> State<Self::Output> {
+            self.0.as_mut().poll(ctx)
+        }
+}
+```
+
+### Run the Example:
+To try out an example demonstrating basic async behavior:
+```bash
+# Run the example
+cargo run --example io
+```
