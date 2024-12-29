@@ -1,5 +1,6 @@
 use crate::task::{Context, SimpleFuture, State, Task, Waker};
 use std::sync::{Arc, Condvar, Mutex};
+use std::collections::VecDeque;
 
 /*
     The Executor struct is responsible for managing the tasks and running them to completion.
@@ -12,14 +13,14 @@ use std::sync::{Arc, Condvar, Mutex};
 */
 
 pub struct Executor {
-    queue: Vec<Task>,
+    queue: VecDeque<Task>,
     notifier: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Executor {
     pub fn new() -> Self {
         Executor {
-            queue: Vec::new(),
+            queue: VecDeque::new(),
             notifier: Arc::new((Mutex::new(false), Condvar::new())),
         }
     }
@@ -29,7 +30,7 @@ impl Executor {
     where
         F: SimpleFuture<Output = ()> + 'static,
     {
-        self.queue.push(
+        self.queue.push_back(
             Task::new(Box::new(f))
         );
     }
@@ -49,10 +50,10 @@ impl Executor {
     // Runs the tasks in the queue to completion
     pub fn run(&mut self) {
         while !self.queue.is_empty() {
-            let mut pending_tasks = Vec::new();
+            let mut pending_tasks = VecDeque::new();
 
             // Run each task in the queue
-            while let Some(mut task) = self.queue.pop() {
+            while let Some(mut task) = self.queue.pop_front() {
                 let waker = Waker::new(Arc::new({
                     let notifier = self.notifier.clone();
                     move || {
@@ -66,7 +67,7 @@ impl Executor {
                 match task.future.poll(&mut ctx) {
                     State::Ready(_) => {}
                     State::Pending => {
-                        pending_tasks.push(task);
+                        pending_tasks.push_back(task);
                     }
                 }
             }
