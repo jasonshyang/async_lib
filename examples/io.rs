@@ -50,7 +50,7 @@ fn main() {
     executor.run();
 }
 
-fn start_task(id: usize, duration: u64) -> BoxedSimpleFuture {
+fn start_task(id: usize, duration: u64) -> IoTask {
     println!("Starting I/O task ... {}", id);
     let (sender, receiver) = channel::<String>();
     let task = IoTask { receiver };
@@ -58,8 +58,7 @@ fn start_task(id: usize, duration: u64) -> BoxedSimpleFuture {
     thread::spawn(move || {
         process_task(id, Duration::from_secs(duration), sender);
     });
-
-    BoxedSimpleFuture(Box::new(task))
+    task
 }
 
 fn process_task(id: usize, duration: Duration, sender: Sender<String>) {
@@ -86,15 +85,5 @@ impl SimpleFuture for IoTask {
                 State::Pending
             }
         }
-    }
-}
-
-struct BoxedSimpleFuture(Box<dyn SimpleFuture<Output = ()>>);
-
-impl SimpleFuture for BoxedSimpleFuture {
-    type Output = ();
-
-    fn poll(&mut self, ctx: &mut Context) -> State<Self::Output> {
-        self.0.as_mut().poll(ctx)
     }
 }

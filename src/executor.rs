@@ -41,6 +41,7 @@ impl Executor {
         let (lock, cvar) = &*self.notifier;
         let mut notified = lock.lock().unwrap();
         while !*notified {
+            println!("Executor is waiting");
             notified = cvar.wait(notified).unwrap();
         }
         *notified = false;
@@ -57,6 +58,7 @@ impl Executor {
                 let waker = Waker::new(Arc::new({
                     let notifier = self.notifier.clone();
                     move || {
+                        println!("Waker is called");
                         let (lock, cvar) = &*notifier;
                         let mut notified = lock.lock().unwrap();
                         *notified = true;
